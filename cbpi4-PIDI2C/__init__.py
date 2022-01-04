@@ -1,69 +1,147 @@
-
-# -*- coding: utf-8 -*-
-
 import asyncio
-from asyncio import tasks
 import logging
-from unittest.mock import MagicMock, patch
-import random
 from cbpi.api import *
 import time
 
 
-@parameters([Property.Number("P", True, 0),
-             Property.Number("I", True, 0),
-             Property.Number("D", True, 0),
-             Property.Number("max. output %", True, 100)])
-
+@parameters([Property.Number(label="P", configurable=True, default_value=117.0795, description="P Value of PID"),
+             Property.Number(label="I", configurable=True, default_value=0.2747, description="I Value of PID"),
+             Property.Number(label="D", configurable=True, default_value=41.58, description="D Value of PID"),
+             Property.Select(label="SampleTime", options=[2,5], description="PID Sample time in seconds. Default: 5 (How often is the output calculation done)"),
+             Property.Number(label="Max_Pump_Temp", configurable=True, default_value=88,
+                             description="Max temp the pump can work in."),
+             Property.Number(label="Max_Boil_Output", configurable=True, default_value=85,
+                             description="Power when Max Boil Temperature is reached."),
+             Property.Number(label="Max_Boil_Temp", configurable=True, default_value=98,
+                             description="When Temperature reaches this, power will be reduced to Max Boil Output."),
+             Property.Number(label="Max_PID_Temp", configurable=True,
+                             description="When this temperature is reached, PID will be turned off"),
+             Property.Number(label="Rest_Interval", configurable=True, default_value=600,
+                             description="Rest the pump after this many seconds during the mash."),
+             Property.Number(label="Rest_Time", configurable=True, default_value=60,
+                             description="Rest the pump for this many seconds every rest interval.")])
 class PIDI2C(CBPiKettleLogic):
 
-   def init(self, props):
-       self.a_p = float(self.props.get("P", 0))
-       self.b_i = float(self.props.get("I", 0))
-       self.c_d = float(self.props.get("D", 0))
-       self.d_max_out = float(self.props.get("max. output %", 0))
-       pass
-
-   async def autoOff(self):
-      self.finished=True
-   
-   async def on_stop(self):
-        if self.finished == False:
-            self.cbpi.notify('PIDI2C', 'Process stopped Manually. Please run Autotune again.', NotificationType.ERROR)
-        await self.actor_off(self.heater)
-        self.running = False
-
-   async def run(self):
-        self.finished = False
+    def __init__(self, cbpi, id, props):
+        super().__init__(cbpi, id, props)
         self._logger = logging.getLogger(type(self).__name__)
-        
-        self.cbpi.notify('PID AutoTune', 'AutoTune In Progress. Do not turn off Auto mode until AutoTuning is complete', NotificationType.INFO)
-        
-        sampleTime = 1
-        wait_time = 1
-        p = float(self.a_p)
-        i = float(self.b_i)
-        d = float(self.c_d)
-        maxout = float(self.d_max_out)
+        self.sample_time, self.max_output, self.pid = None, None, None
+        self.work_time, self.rest_time, self.max_output_boil = None, None, None
+        self.max_boil_temp, self.max_pid_temp, self.max_pump_temp = None, None, None
+        self.kettle, self.heater, self.agitator = None, None, None
+
+    async def on_stop(self):
+        # ensure to switch also pump off when logic stops
+        await self.actor_off(self.agitator)
+
+    # subroutine that controlls pump aue and ump stop if max pump temp is reached
+    async def pump_control(self):
+        #get pump based on agitator id
+        self.pump = self.cbpi.actor.find_by_id(self.agitator)
+
+        while self.running:
+            # get current pump status
+            pump_on = self.pump.instance.state
+            # if the current temp is below the max pump temp, check if pause time is reached to pause pump
+            if self.get_sensor_value(self.kettle.sensor).get("value") < self.max_pump_temp:
+                self._logger.debug("starting pump")
+                #switch the pump on
+                await self.actor_on(self.agitator)
+                # calculate time, when pump should do the next pause
+                off_time = time.time() + self.work_time
+                # run pump until next pause time is reached
+                while time.time() < off_time:
+                    await asyncio.sleep(1)
+                    # stop cycle, if current temp is higher than max pump temp
+                    if self.get_sensor_value(self.kettle.sensor).get("value") >= self.max_pump_temp:
+                        break
+                # pause pump when active pump Interval is completed
+                self._logger.debug("resting pump")
+                await self.actor_off(self.agitator)
+                await asyncio.sleep(self.rest_time)
+            # If temeprature is above max pump temp, and pump is on, switch it off
+            # Staops also the pump if user switches it on and temp is abouve max pump temp
+            else:
+                if pump_on:
+                    self._logger.debug("pump max temp reached, pump turned off")
+                    await self.actor_off(self.agitator)
+                await asyncio.sleep(1)
+
+    # subroutine that controlls temperature via pid controll
+    async def temp_control(self):
+        await self.actor_on(self.heater,0)
+        logging.info("Heater on with zero Power")
+        heat_percent_old = 0
+        while self.running:
+            current_kettle_power= self.heater_actor.power
+            # get current temeprature
+            sensor_value = current_temp = self.get_sensor_value(self.kettle.sensor).get("value")
+            # get the current target temperature for the kettle
+            target_temp = self.get_kettle_target_temp(self.id)
+            # if current temperature is higher the defined boil temp, use fixed heating percent instead of PID values for controlled boiling
+            if current_temp >= self.max_boil_temp:
+                heat_percent = self.max_output_boil
+            # if current temperature is above max pid temp (should be higher than mashout temp and lower then max boil temp) 100% output will be used untile boil temp is reached
+            elif current_temp >= self.max_pid_temp:
+                heat_percent = self.max_output
+            # at lower temepratures, PID algorythm will valculate heat percent value
+            else:
+                heat_percent = self.pid.calc(sensor_value, target_temp)
+
+            # Test with actor power
+            if (heat_percent != heat_percent_old) or (heat_percent != current_kettle_power):
+                await self.actor_set_power(self.heater,heat_percent)
+                heat_percent_old = heat_percent
+            await asyncio.sleep(self.sample_time)
+
+    async def run(self):
         try:
-           pid = PIDI2C(sampleTime, p, i, d, 0, maxout)
+            self.sample_time = int(self.props.get("SampleTime",5))
+            self.max_output = 100
+            p = float(self.props.get("P", 117.0795))
+            i = float(self.props.get("I", 0.2747))
+            d = float(self.props.get("D", 41.58))
+            self.pid = PIDArduino(self.sample_time, p, i, d, 0, self.max_output)
+
+            self.work_time = float(self.props.get("Rest_Interval", 600))
+            self.rest_time = float(self.props.get("Rest_Time", 60))
+            self.max_output_boil = float(self.props.get("Max_Boil_Output", 85))
+            
+            self.TEMP_UNIT = self.get_config_value("TEMP_UNIT", "C")
+            boilthreshold = 98 if self.TEMP_UNIT == "C" else 208
+            maxpidtemp = 88 if self.TEMP_UNIT == "C" else 190
+            maxpumptemp = 88 if self.TEMP_UNIT == "C" else 190
+
+
+            self.max_boil_temp = float(self.props.get("Max_Boil_Temp", boilthreshold))
+            self.max_pid_temp = float(self.props.get("Max_PID_Temp", maxpidtemp))
+            self.max_pump_temp = float(self.props.get("Max_Pump_Temp", maxpumptemp))
+
+            self.kettle = self.get_kettle(self.id)
+            self.heater = self.kettle.heater
+            self.agitator = self.kettle.agitator
+            self.heater_actor = self.cbpi.actor.find_by_id(self.heater)
+
+            logging.info("CustomLogic P:{} I:{} D:{} {} {}".format(p, i, d, self.kettle, self.heater))
+
+            pump_controller = asyncio.create_task(self.pump_control())
+            temp_controller = asyncio.create_task(self.temp_control())
+
+            await pump_controller
+            await temp_controller
+
+        except asyncio.CancelledError as e:
+            pass
         except Exception as e:
-            self.cbpi.notify('PIDI2C', 'AutoTune Error: {}'.format(str(e)),NotificationType.ERROR)
-            pid.log(str(e))
-            await self.autoOff()
-                
-        while self.is_running():
-            heat_percent = pid.calc(self.get_temp(), self.get_target_temp())
-            heating_time = sampleTime * heat_percent / 100
-            wait_time = sampleTime - heating_time
-            self.heater_on(int(heat_percent))
-            self.actor_power(int(heat_percent))
-            self.sleep(heating_time)
-            self.sleep(wait_time)
+            logging.error("BM_PIDSmartBoilWithPump Error {}".format(e))
+        finally:
+            self.running = False
+            await self.actor_off(self.heater)
+
 
 # Based on Arduino PID Library
 # See https://github.com/br3ttb/Arduino-PID-Library
-class PIDI2C(object):
+class PIDArduino(object):
 
     def __init__(self, sampleTimeSec, kp, ki, kd, outputMin=float('-inf'),
                  outputMax=float('inf'), getTimeMs=None):
@@ -73,7 +151,7 @@ class PIDI2C(object):
             raise ValueError('ki must be specified')
         if kd is None:
             raise ValueError('kd must be specified')
-        if sampleTimeSec <= 0:
+        if float(sampleTimeSec) <= float(0):
             raise ValueError('sampleTimeSec must be greater than 0')
         if outputMin >= outputMax:
             raise ValueError('outputMin must be less than outputMax')
@@ -106,7 +184,7 @@ class PIDI2C(object):
         dInput = inputValue - self._lastInput
 
         # In order to prevent windup, only integrate if the process is not saturated
-        if self._lastOutput < self._outputMax and self._lastOutput > self._outputMin:
+        if self._outputMax > self._lastOutput > self._outputMin:
             self._iTerm += self._Ki * error
             self._iTerm = min(self._iTerm, self._outputMax)
             self._iTerm = max(self._iTerm, self._outputMin)
@@ -133,12 +211,9 @@ class PIDI2C(object):
 
     def _currentTimeMs(self):
         return time.time() * 1000
-  
 
 
 def setup(cbpi):
-
-
     '''
     This method is called by the server during startup 
     Here you need to register your plugins at the server
@@ -146,6 +221,7 @@ def setup(cbpi):
     :param cbpi: the cbpi core 
     :return: 
     '''
-    cbpi.plugin.register("PIDI2C", PIDI2C)    
-    pass
 
+    cbpi.plugin.register("PIDI2C", PIDI2C)
+
+   
