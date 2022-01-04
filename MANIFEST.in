@@ -1,0 +1,2 @@
+include cbpi4-PIDI2C/config.yaml
+recursive-include cbpi4-PIDI2C/static *
