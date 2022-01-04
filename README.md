@@ -10,7 +10,7 @@ It is based on this cbpi3 Plugin (https://github.com/cgspeck/cbpi-pidsmartboil-w
 ### Installation:
 
 You can install (or clone) it from the GIT Repo. In case of updates, you will find them here first:
-- sudo pip3 install https://github.com/avollkopf/cbpi4-BM_PID_SmartBoilWithPump/archive/main.zip
+- sudo pip3 install https://github.com/adler72/cbpi4-PIDI2C/archive/main.zip
 
 Afterwards you will need to activate the plugin:
 - cbpi add cbpi4-BM_PID_SmartBoilWithPump
