@@ -8,18 +8,12 @@ import time
              Property.Number(label="I", configurable=True, default_value=0.2747, description="I Value of PID"),
              Property.Number(label="D", configurable=True, default_value=41.58, description="D Value of PID"),
              Property.Select(label="SampleTime", options=[2,5], description="PID Sample time in seconds. Default: 5 (How often is the output calculation done)"),
-             Property.Number(label="Max_Pump_Temp", configurable=True, default_value=88,
-                             description="Max temp the pump can work in."),
              Property.Number(label="Max_Boil_Output", configurable=True, default_value=85,
                              description="Power when Max Boil Temperature is reached."),
              Property.Number(label="Max_Boil_Temp", configurable=True, default_value=98,
                              description="When Temperature reaches this, power will be reduced to Max Boil Output."),
              Property.Number(label="Max_PID_Temp", configurable=True,
-                             description="When this temperature is reached, PID will be turned off"),
-             Property.Number(label="Rest_Interval", configurable=True, default_value=600,
-                             description="Rest the pump after this many seconds during the mash."),
-             Property.Number(label="Rest_Time", configurable=True, default_value=60,
-                             description="Rest the pump for this many seconds every rest interval.")])
+                             description="When this temperature is reached, PID will be turned off")])
 class PIDI2C(CBPiKettleLogic):
 
     def __init__(self, cbpi, id, props):
@@ -34,39 +28,7 @@ class PIDI2C(CBPiKettleLogic):
         # ensure to switch also pump off when logic stops
         await self.actor_off(self.agitator)
 
-    # subroutine that controlls pump aue and ump stop if max pump temp is reached
-    async def pump_control(self):
-        #get pump based on agitator id
-        self.pump = self.cbpi.actor.find_by_id(self.agitator)
-
-        while self.running:
-            # get current pump status
-            pump_on = self.pump.instance.state
-            # if the current temp is below the max pump temp, check if pause time is reached to pause pump
-            if self.get_sensor_value(self.kettle.sensor).get("value") < self.max_pump_temp:
-                self._logger.debug("starting pump")
-                #switch the pump on
-                await self.actor_on(self.agitator)
-                # calculate time, when pump should do the next pause
-                off_time = time.time() + self.work_time
-                # run pump until next pause time is reached
-                while time.time() < off_time:
-                    await asyncio.sleep(1)
-                    # stop cycle, if current temp is higher than max pump temp
-                    if self.get_sensor_value(self.kettle.sensor).get("value") >= self.max_pump_temp:
-                        break
-                # pause pump when active pump Interval is completed
-                self._logger.debug("resting pump")
-                await self.actor_off(self.agitator)
-                await asyncio.sleep(self.rest_time)
-            # If temeprature is above max pump temp, and pump is on, switch it off
-            # Staops also the pump if user switches it on and temp is abouve max pump temp
-            else:
-                if pump_on:
-                    self._logger.debug("pump max temp reached, pump turned off")
-                    await self.actor_off(self.agitator)
-                await asyncio.sleep(1)
-
+   
     # subroutine that controlls temperature via pid controll
     async def temp_control(self):
         await self.actor_on(self.heater,0)
@@ -115,8 +77,7 @@ class PIDI2C(CBPiKettleLogic):
 
             self.max_boil_temp = float(self.props.get("Max_Boil_Temp", boilthreshold))
             self.max_pid_temp = float(self.props.get("Max_PID_Temp", maxpidtemp))
-            self.max_pump_temp = float(self.props.get("Max_Pump_Temp", maxpumptemp))
-
+            
             self.kettle = self.get_kettle(self.id)
             self.heater = self.kettle.heater
             self.agitator = self.kettle.agitator
@@ -124,16 +85,14 @@ class PIDI2C(CBPiKettleLogic):
 
             logging.info("CustomLogic P:{} I:{} D:{} {} {}".format(p, i, d, self.kettle, self.heater))
 
-            pump_controller = asyncio.create_task(self.pump_control())
             temp_controller = asyncio.create_task(self.temp_control())
 
-            await pump_controller
             await temp_controller
 
         except asyncio.CancelledError as e:
             pass
         except Exception as e:
-            logging.error("BM_PIDSmartBoilWithPump Error {}".format(e))
+            logging.error("PIDI2C Error {}".format(e))
         finally:
             self.running = False
             await self.actor_off(self.heater)
