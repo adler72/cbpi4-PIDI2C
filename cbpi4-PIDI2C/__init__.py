@@ -53,6 +53,7 @@ class PIDI2C(CBPiKettleLogic):
 
             # Test with actor power
             if (heat_percent != heat_percent_old) or (heat_percent != current_kettle_power):
+                await self.actor_on(self.Actor)
                 await self.actor_set_power(self.heater,heat_percent)
                 heat_percent_old = heat_percent
             await asyncio.sleep(self.sample_time)
@@ -83,6 +84,7 @@ class PIDI2C(CBPiKettleLogic):
             self.heater = self.kettle.heater
             self.agitator = self.kettle.agitator
             self.heater_actor = self.cbpi.actor.find_by_id(self.heater)
+            self.Actor = self.props.get("Heater_Relais", None)
 
             logging.info("CustomLogic P:{} I:{} D:{} {} {}".format(p, i, d, self.kettle, self.heater))
 
@@ -97,6 +99,8 @@ class PIDI2C(CBPiKettleLogic):
         finally:
             self.running = False
             await self.actor_off(self.heater)
+            await self.actor_off(self.actor)
+
 
 
 # Based on Arduino PID Library
