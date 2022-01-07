@@ -24,24 +24,20 @@ class PIDI2C(CBPiKettleLogic):
         self.work_time, self.rest_time, self.max_output_boil = None, None, None
         self.max_boil_temp, self.max_pid_temp, self.max_pump_temp = None, None, None
         self.kettle, self.heater, self.agitator = None, None, None
-
+        self.actors = []
+        if self.props.get("Heater_Relais", None) is not None:
+            self.actors.append(self.props.get("Heater_Relais"))
+            
     async def on_stop(self):
         # ensure to switch also pump off when logic stops
         await self.actor_off(self.agitator)
-    
-    def __init__(self, cbpi, id, props):
-        self.state = False
-        self.base = self.props.get("Actor", None)
-        try:
-            self.name = (self.cbpi.actor.find_by_id(self.base).name)
-        except:
-            self.name = ""
+        for actor in self.actors:
+            await self.cbpi.actor.off(actor)
    
     # subroutine that controlls temperature via pid controll
     async def temp_control(self):
         await self.actor_on(self.heater,0)
         logging.info("Heater on with zero Power")
-        self.base = self.props.get("Heater_Relais", None)
         heat_percent_old = 0
         while self.running:
             current_kettle_power= self.heater_actor.power
@@ -61,7 +57,9 @@ class PIDI2C(CBPiKettleLogic):
 
             # Test with actor power
             if (heat_percent != heat_percent_old) or (heat_percent != current_kettle_power):
-                await self.cbpi.actor_on(self.base)
+                for actor in self.actors:
+                    await self.cbpi.actor.on(actor,self.power)
+                await self.cbpi.actor.actor_update(self.id,power)
                 await self.actor_set_power(self.heater,heat_percent)
                 heat_percent_old = heat_percent
             await asyncio.sleep(self.sample_time)
@@ -92,8 +90,7 @@ class PIDI2C(CBPiKettleLogic):
             self.heater = self.kettle.heater
             self.agitator = self.kettle.agitator
             self.heater_actor = self.cbpi.actor.find_by_id(self.heater)
-            self.base = self.props.get("Heater_Relais", None)
-           
+                     
             logging.info("CustomLogic P:{} I:{} D:{} {} {}".format(p, i, d, self.kettle, self.heater))
 
             temp_controller = asyncio.create_task(self.temp_control())
@@ -107,11 +104,10 @@ class PIDI2C(CBPiKettleLogic):
         finally:
             self.running = False
             await self.actor_off(self.heater)
-            await self.cbpi.actor_off(self.base)
+            for actor in self.actors:
+                await self.cbpi.actor.off(actor)
             
-
-
-
+          
 # Based on Arduino PID Library
 # See https://github.com/br3ttb/Arduino-PID-Library
 class PIDArduino(object):
