@@ -28,13 +28,20 @@ class PIDI2C(CBPiKettleLogic):
     async def on_stop(self):
         # ensure to switch also pump off when logic stops
         await self.actor_off(self.agitator)
-
+    
+    def __init__(self, cbpi, id, props):
+        self.state = False
+        self.base = self.props.get("Actor", None)
+        try:
+            self.name = (self.cbpi.actor.find_by_id(self.base).name)
+        except:
+            self.name = ""
    
     # subroutine that controlls temperature via pid controll
     async def temp_control(self):
         await self.actor_on(self.heater,0)
         logging.info("Heater on with zero Power")
-         self.base = self.props.get("Heater_Relais", None)
+        self.base = self.props.get("Heater_Relais", None)
         heat_percent_old = 0
         while self.running:
             current_kettle_power= self.heater_actor.power
