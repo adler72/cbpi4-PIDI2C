@@ -4,7 +4,8 @@ from cbpi.api import *
 import time
 
 
-@parameters([Property.Number(label="P", configurable=True, default_value=117.0795, description="P Value of PID"),
+@parameters([Property.Actor(label = "Heater_Relais",description="Relais for Heater on"),
+             Property.Number(label="P", configurable=True, default_value=117.0795, description="P Value of PID"),
              Property.Number(label="I", configurable=True, default_value=0.2747, description="I Value of PID"),
              Property.Number(label="D", configurable=True, default_value=41.58, description="D Value of PID"),
              Property.Select(label="SampleTime", options=[2,5], description="PID Sample time in seconds. Default: 5 (How often is the output calculation done)"),
@@ -60,9 +61,9 @@ class PIDI2C(CBPiKettleLogic):
         try:
             self.sample_time = int(self.props.get("SampleTime",5))
             self.max_output = 100
-            p = float(self.props.get("P", 117.0795))
-            i = float(self.props.get("I", 0.2747))
-            d = float(self.props.get("D", 41.58))
+            p = float(self.props.get("P", 12.0))
+            i = float(self.props.get("I", 0.05))
+            d = float(self.props.get("D", 0))
             self.pid = PIDArduino(self.sample_time, p, i, d, 0, self.max_output)
 
             self.work_time = float(self.props.get("Rest_Interval", 600))
