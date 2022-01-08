@@ -7,7 +7,7 @@ with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='cbpi4-PIDI2C',
-      version='0.0.7',
+      version='0.0.8',
       description='CraftBeerPi4 PID Kettle Logic Plugin',
       author=['Marc Adler'],
       author_email='aeda@gmx.de',
