@@ -23,7 +23,7 @@ class PIDI2C(CBPiKettleLogic):
         self.sample_time, self.max_output, self.pid = None, None, None
         self.work_time, self.rest_time, self.max_output_boil = None, None, None
         self.max_boil_temp, self.max_pid_temp, self.max_pump_temp = None, None, None
-        self.kettle, self.heater, self.agitator = None, None, None
+        self.kettle, self.heater, self.agitator, self.actor = None, None, None, None
         self.actors = []
         if self.props.get("Heater_Relais", None) is not None:
             self.actors.append(self.props.get("Heater_Relais"))
@@ -31,8 +31,8 @@ class PIDI2C(CBPiKettleLogic):
     async def on_stop(self):
         # ensure to switch also pump off when logic stops
         await self.actor_off(self.agitator)
-        for actor in self.actors:
-            await self.cbpi.actor.off(actor)
+        await self.actor_off(self.actor)
+        
    
     # subroutine that controlls temperature via pid controll
     async def temp_control(self):
@@ -57,9 +57,7 @@ class PIDI2C(CBPiKettleLogic):
 
             # Test with actor power
             if (heat_percent != heat_percent_old) or (heat_percent != current_kettle_power):
-                for actor in self.actors:
-                    await self.cbpi.actor.on(actor,self.power)
-                await self.cbpi.actor.actor_update(self.id,power)
+                await self.actor_on(self.actor)
                 await self.actor_set_power(self.heater,heat_percent)
                 heat_percent_old = heat_percent
             await asyncio.sleep(self.sample_time)
@@ -89,6 +87,7 @@ class PIDI2C(CBPiKettleLogic):
             self.kettle = self.get_kettle(self.id)
             self.heater = self.kettle.heater
             self.agitator = self.kettle.agitator
+            self.actor = self.props.get("Heater_Relais", None)
             self.heater_actor = self.cbpi.actor.find_by_id(self.heater)
                      
             logging.info("CustomLogic P:{} I:{} D:{} {} {}".format(p, i, d, self.kettle, self.heater))
