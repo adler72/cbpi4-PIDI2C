@@ -19,7 +19,7 @@ Afterwards you will need to activate the plugin:
 
 ## Parameters:
 
-![Settings](https://github.com/avollkopf/cbpi4-BM_PID_SmartBoilWithPump/blob/main/PIDI2C_config.png?raw=true)
+![Settings](https://github.com/adler72/cbpi4-PIDI2C/blob/main/PIDI2C_config.png?raw=true)
 
 - Configurable:
 	- P: Proportional - Takes current value into account
