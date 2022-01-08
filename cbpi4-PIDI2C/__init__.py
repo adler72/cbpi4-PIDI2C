@@ -12,9 +12,7 @@ import time
              Property.Number(label="Max_Boil_Output", configurable=True, default_value=85,
                              description="Power when Max Boil Temperature is reached."),
              Property.Number(label="Max_Boil_Temp", configurable=True, default_value=98,
-                             description="When Temperature reaches this, power will be reduced to Max Boil Output."),
-             Property.Number(label="Max_PID_Temp", configurable=True,
-                             description="When this temperature is reached, PID will be turned off")])
+                             description="When Temperature reaches this, power will be reduced to Max Boil Output.")])
 class PIDI2C(CBPiKettleLogic):
 
     def __init__(self, cbpi, id, props):
@@ -22,12 +20,9 @@ class PIDI2C(CBPiKettleLogic):
         self._logger = logging.getLogger(type(self).__name__)
         self.sample_time, self.max_output, self.pid = None, None, None
         self.work_time, self.rest_time, self.max_output_boil = None, None, None
-        self.max_boil_temp, self.max_pid_temp, self.max_pump_temp = None, None, None
+        self.max_boil_temp = None
         self.kettle, self.heater, self.agitator, self.actor = None, None, None, None
-        self.actors = []
-        if self.props.get("Heater_Relais", None) is not None:
-            self.actors.append(self.props.get("Heater_Relais"))
-            
+                    
     async def on_stop(self):
         # ensure to switch also pump off when logic stops
         await self.actor_off(self.agitator)
@@ -49,9 +44,6 @@ class PIDI2C(CBPiKettleLogic):
             if current_temp >= self.max_boil_temp:
                 heat_percent = self.max_output_boil
             # if current temperature is above max pid temp (should be higher than mashout temp and lower then max boil temp) 100% output will be used untile boil temp is reached
-            elif current_temp >= self.max_pid_temp:
-                heat_percent = self.max_output
-            # at lower temepratures, PID algorythm will valculate heat percent value
             else:
                 heat_percent = self.pid.calc(sensor_value, target_temp)
 
@@ -77,13 +69,9 @@ class PIDI2C(CBPiKettleLogic):
             
             self.TEMP_UNIT = self.get_config_value("TEMP_UNIT", "C")
             boilthreshold = 98 if self.TEMP_UNIT == "C" else 208
-            maxpidtemp = 88 if self.TEMP_UNIT == "C" else 190
-            maxpumptemp = 88 if self.TEMP_UNIT == "C" else 190
-
-
+           
             self.max_boil_temp = float(self.props.get("Max_Boil_Temp", boilthreshold))
-            self.max_pid_temp = float(self.props.get("Max_PID_Temp", maxpidtemp))
-            
+                        
             self.kettle = self.get_kettle(self.id)
             self.heater = self.kettle.heater
             self.agitator = self.kettle.agitator
@@ -103,8 +91,7 @@ class PIDI2C(CBPiKettleLogic):
         finally:
             self.running = False
             await self.actor_off(self.heater)
-            for actor in self.actors:
-                await self.cbpi.actor.off(actor)
+            await self.actor_off(self.actor)
             
           
 # Based on Arduino PID Library
